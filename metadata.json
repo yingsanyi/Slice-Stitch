@@ -1,0 +1,5 @@
+{
+  "name": "Slice & Stitch Studio",
+  "description": "A professional image tool to slice images into 9-grid puzzles or stitch multiple photos into high-quality long scrolling images with custom aspect ratios.",
+  "requestFramePermissions": []
+}
