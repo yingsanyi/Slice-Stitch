@@ -4,9 +4,16 @@ import { CropArea, StitchItem, StitchConfig } from '../types';
 export const loadImage = (url: string): Promise<HTMLImageElement> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
+    // Fix for local blob URLs: usually don't need crossOrigin, 
+    // but if it's an external URL, we do.
+    if (!url.startsWith('blob:')) {
+      img.crossOrigin = 'anonymous';
+    }
     img.onload = () => resolve(img);
-    img.onerror = reject;
+    img.onerror = (e) => {
+        console.error("Failed to load image", url, e);
+        reject(e);
+    };
     img.src = url;
   });
 };
@@ -38,43 +45,30 @@ export const generateNineGrid = async (
   ctx.fillRect(0, 0, outputSize, outputSize);
 
   // Logic to match CSS "object-fit: cover" exactly
-  // The UI container (uiContainerSize) shows the crop box.
-  // We need to map the UI coordinates (which are relative to the UI box) to the Canvas coordinates.
   const K = outputSize / uiContainerSize;
   const imgAspect = img.width / img.height;
 
-  // Calculate dimensions of the image as it would be drawn to "cover" the outputSize square.
   let drawWidth, drawHeight;
 
   if (imgAspect > 1) {
-    // Landscape: Height = BoxHeight. Width = Height * Aspect
+    // Landscape
     drawHeight = outputSize;
     drawWidth = outputSize * imgAspect;
   } else {
-    // Portrait/Square: Width = BoxWidth. Height = Width / Aspect
+    // Portrait/Square
     drawWidth = outputSize;
     drawHeight = outputSize / imgAspect;
   }
 
   // User Transforms
-  // crop.x / crop.y are translations in UI pixels. Convert to Canvas pixels.
   const moveX = crop.x * K;
   const moveY = crop.y * K;
 
   ctx.save();
-  
-  // 1. Move origin to center of canvas
   ctx.translate(outputSize / 2, outputSize / 2);
-  
-  // 2. Apply Panning (X/Y)
   ctx.translate(moveX, moveY);
-  
-  // 3. Apply Scaling
   ctx.scale(crop.scale, crop.scale);
-  
-  // 4. Draw Image Centered (at the calculated cover size)
   ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
-  
   ctx.restore();
 
   // Slice into 9 parts
@@ -128,9 +122,6 @@ export const generateStitchedImage = async (
     let slotHeight: number;
 
     if (item.ratio === 'original') {
-       // For original, we maintain the image aspect ratio fully visible?
-       // OR does it behave like "Cover" in a dynamic height box?
-       // In the DOM preview for 'original', height is auto, so it just fits width.
        slotHeight = contentWidth / imgAspect;
     } else {
       const [w, h] = item.ratio.split(':').map(Number);
@@ -148,54 +139,69 @@ export const generateStitchedImage = async (
     };
   });
 
-  // Total Canvas Height
+  // Total Logical Height
   const totalContentHeight = drawData.reduce((acc, d) => acc + d.slotHeight + d.spacing, 0);
-  // Remove last spacing
   const finalSpacing = drawData.length > 0 ? drawData[drawData.length - 1].spacing : 0;
   const totalHeight = totalContentHeight - finalSpacing + (config.outerPadding * 2);
 
+  // --- SAFETY CHECK & DOWNSCALE ---
+  // Mobile browsers often crash above 16k pixels height or > 50MP area.
+  // We set a safe limit of ~50 Megapixels (e.g. 5000 x 10000).
+  const MAX_AREA = 50 * 1000 * 1000; 
+  const currentArea = outputWidth * totalHeight;
+  
+  let finalScale = 1.0;
+  if (currentArea > MAX_AREA) {
+      finalScale = Math.sqrt(MAX_AREA / currentArea);
+      console.warn(`Canvas too large (${outputWidth}x${totalHeight}), downscaling by ${finalScale.toFixed(2)} to prevent crash.`);
+  }
+
   const canvas = document.createElement('canvas');
-  canvas.width = outputWidth;
-  canvas.height = totalHeight;
+  // Apply scale to physical dimensions
+  canvas.width = Math.floor(outputWidth * finalScale);
+  canvas.height = Math.floor(totalHeight * finalScale);
+
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas context failed');
 
+  // CRITICAL FIX: Scale the context!
+  // All drawing commands below use logical coords (outputWidth), 
+  // so we must scale the context to map them to the smaller physical canvas.
+  ctx.scale(finalScale, finalScale);
+
   // Fill Background
   ctx.fillStyle = config.backgroundColor;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // We fill using logical dimensions because we already scaled the context
+  ctx.fillRect(0, 0, outputWidth, totalHeight);
 
   let currentY = config.outerPadding;
 
   drawData.forEach(({ img, slotHeight, item, spacing }) => {
-    // Define the slot area
     const slotX = config.outerPadding;
     const slotY = currentY;
 
     ctx.save();
     
-    // Clip to the slot area (so scaled/moved images don't bleed)
+    // Clip to the slot area
     ctx.beginPath();
     ctx.rect(slotX, slotY, contentWidth, slotHeight);
     ctx.clip();
 
-    // Optional: Fill slot with white behind image (transparency handling)
-    ctx.fillStyle = '#eee';
+    // Fill slot background
+    ctx.fillStyle = config.backgroundColor; // Match main bg or use white? Usually transparent/match bg.
     ctx.fillRect(slotX, slotY, contentWidth, slotHeight);
 
-    // --- Drawing Logic matching CSS "Object-fit: Cover" + "Transform" ---
-    
     const slotAspect = contentWidth / slotHeight;
     const imgAspect = img.width / img.height;
     
     let drawW, drawH;
 
-    // Logic for 'cover':
+    // Logic for 'cover' / 'contain' simulation based on user scale
+    // The UI uses a hybrid model. But assuming standard 'cover' logic base:
     if (imgAspect > slotAspect) {
-      // Image wider: Height = slotHeight, Width = scaled
       drawH = slotHeight;
       drawW = drawH * imgAspect;
     } else {
-      // Image taller: Width = contentWidth, Height = scaled
       drawW = contentWidth;
       drawH = drawW / imgAspect;
     }
@@ -209,10 +215,11 @@ export const generateStitchedImage = async (
     const scale = item.scale || 1;
     ctx.scale(scale, scale);
 
-    // 3. Apply User Panning (Translate)
-    // In CSS: translate(x%, y%). Percent is relative to the element (the image itself).
-    // Wait, CSS translate percentage is relative to the element bounding box.
-    // So if drawW=500, 10% = 50px.
+    // 3. Apply User Panning
+    // Note: In UI, x/y are percentages of the IMAGE size, not the slot.
+    // But checking LongImageStitcher logic: `translate(${item.x}%, ${item.y}%)` applied to img.
+    // This translates relative to the element (the image).
+    // So x=10 means 10% of drawW.
     const moveX = (item.x || 0) / 100 * drawW; 
     const moveY = (item.y || 0) / 100 * drawH;
     
@@ -226,6 +233,14 @@ export const generateStitchedImage = async (
     currentY += slotHeight + spacing;
   });
 
-  // Use PNG for lossless quality
-  return canvas.toDataURL('image/png');
+  // Use Blob instead of DataURL to handle large files
+  return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+          if (blob) {
+              resolve(URL.createObjectURL(blob));
+          } else {
+              reject(new Error("Canvas export failed (empty blob)"));
+          }
+      }, 'image/png');
+  });
 };

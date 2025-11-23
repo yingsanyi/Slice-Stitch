@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Upload, Download, Move, RefreshCw, ZoomIn, Image as ImageIcon, Trash2, Package, MousePointerClick, RotateCcw, ChevronDown, FolderOutput, FileArchive } from 'lucide-react';
 import { CropArea, SlicedImage } from '../types';
@@ -93,7 +92,7 @@ const NineGridSlicer: React.FC = () => {
     } else if (activePointers.current.size === 2) {
         // Start Pinch - Stop dragging
         setIsDragging(false);
-        const pts = Array.from(activePointers.current.values());
+        const pts = Array.from(activePointers.current.values()) as { x: number; y: number }[];
         const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         initialPinchDist.current = dist;
     }
@@ -106,7 +105,7 @@ const NineGridSlicer: React.FC = () => {
 
     if (activePointers.current.size === 2) {
         // Handle Pinch
-        const pts = Array.from(activePointers.current.values());
+        const pts = Array.from(activePointers.current.values()) as { x: number; y: number }[];
         const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         
         if (initialPinchDist.current) {

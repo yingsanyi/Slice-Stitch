@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, ChevronLeft, Plus, Image as ImageIcon, Download, Layers, ArrowUp, ArrowDown, Trash2, GripVertical, RotateCcw, ChevronDown, Minus, Plus as PlusIcon, Lock, AlertCircle, X, Maximize, MoveVertical, MoveHorizontal, Scan, ChevronUp } from 'lucide-react';
 import { CropArea, StitchItem, StitchConfig, AspectRatio } from '../types';
@@ -79,7 +78,7 @@ const MomentsStitcher: React.FC = () => {
         setDragStart({ x: e.clientX - crop.x, y: e.clientY - crop.y });
     } else if (activePointers.current.size === 2) {
         setIsDragging(false);
-        const pts = Array.from(activePointers.current.values());
+        const pts = Array.from(activePointers.current.values()) as { x: number; y: number }[];
         initialPinchDist.current = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     }
   };
@@ -91,7 +90,7 @@ const MomentsStitcher: React.FC = () => {
 
     if (activePointers.current.size === 2) {
         // Pinch
-        const pts = Array.from(activePointers.current.values());
+        const pts = Array.from(activePointers.current.values()) as { x: number; y: number }[];
         const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         
         if (initialPinchDist.current) {
@@ -470,7 +469,7 @@ const StoryEditor: React.FC<{
 
         if (map.size === 2) {
             // Start Pinch
-            const pts = Array.from(map.values());
+            const pts = Array.from(map.values()) as { x: number; y: number }[];
             itemPinchStart.current.set(item.id, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y));
         }
     };
@@ -486,7 +485,7 @@ const StoryEditor: React.FC<{
 
         if (map.size === 2) {
             // Pinch Logic
-            const pts = Array.from(map.values());
+            const pts = Array.from(map.values()) as { x: number; y: number }[];
             const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
             const startDist = itemPinchStart.current.get(item.id);
             
